@@ -1,105 +1,89 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from PIL import Image
 
-def get_user_matrix():
-    print("Enter the 16x16 matrix elements row by row.")
-    print("Separate elements with spaces, and press Enter after each row.")
-    matrix = []
-    for i in range(16):
-        while True:
-            try:
-                row = list(map(int, input(f"Enter row {i+1}: ").split()))
-                if len(row) != 16:
-                    raise ValueError("Each row must contain exactly 16 elements.")
-                matrix.append(row)
-                break
-            except ValueError as e:
-                print(f"Invalid input: {e}. Please try again.")
-    return np.array(matrix)
+# Function to check if a matrix is invertible in mod 256
+def is_invertible(matrix, mod=256):
+    det = int(round(np.linalg.det(matrix))) % mod
+    return det != 0 and np.gcd(det, mod) == 1
 
-def is_invertible(matrix):
-    return np.linalg.det(matrix) != 0
+# Function to find modular inverse of a matrix in mod 256
+def mod_matrix_inverse(matrix, mod=256):
+    det = int(round(np.linalg.det(matrix))) % mod
+    det_inv = pow(det, -1, mod)  # Inverse of determinant mod 256
+    matrix_mod_inv = (
+        np.round(det_inv * np.linalg.inv(matrix) * np.linalg.det(matrix))
+        .astype(int) % mod
+    )
+    return matrix_mod_inv
 
-def encrypt_decrypt_image(image_path, key_matrix):
-    try:
-        # Read the image
-        img = Image.open(image_path)
-        img_array = np.array(img)
-        
-        # Convert to RGB if image is RGBA
-        if img_array.ndim == 3 and img_array.shape[2] == 4:
-            img = img.convert('RGB')
-            img_array = np.array(img)
-        
-        # Ensure the image is 3D (RGB)
-        if img_array.ndim == 2:
-            img_array = np.stack((img_array,)*3, axis=-1)
-        
-        height, width, channels = img_array.shape
+# Function to generate a random 5x5 invertible matrix in mod 256
+def generate_random_invertible_matrix(size=5, mod=256):
+    while True:
+        matrix = np.random.randint(0, mod, (size, size))
+        if is_invertible(matrix, mod):
+            return matrix
 
-        # Convert to grayscale for encryption
-        img_gray = img.convert('L')
-        img_gray_array = np.array(img_gray)
+# Encrypt function using Hill cipher
+def hill_cipher_encrypt(image, key_matrix):
+    # Convert image to numpy array and get its shape
+    pixel_values = np.array(image)
+    original_shape = pixel_values.shape
+    pixel_values = pixel_values.flatten()
 
-        # Pad the image if necessary
-        pad_height = (16 - height % 16) % 16
-        pad_width = (16 - width % 16) % 16
-        img_padded = np.pad(img_gray_array, ((0, pad_height), (0, pad_width)), mode='constant')
+    # Padding to make the length a multiple of 5
+    padding_length = (5 - len(pixel_values) % 5) % 5
+    pixel_values = np.pad(pixel_values, (0, padding_length), mode='constant')
 
-        # Reshape the image into 16x16 blocks
-        blocks = img_padded.reshape((-1, 16, 16))
+    # Split into groups of 5 pixels
+    pixel_groups = np.split(pixel_values, len(pixel_values) // 5)
 
-        # Encrypt
-        encrypted_blocks = np.array([np.dot(key_matrix, block) % 256 for block in blocks]).astype(int)
-        encrypted_img = encrypted_blocks.reshape(img_padded.shape)
+    # Encrypt each group
+    encrypted_pixels = []
+    for group in pixel_groups:
+        encrypted_group = np.dot(key_matrix, group) % 256
+        encrypted_pixels.extend(encrypted_group)
 
-        # Decrypt
-        inv_key_matrix = np.linalg.inv(key_matrix)
-        decrypted_blocks = np.array([np.round(np.dot(inv_key_matrix, block)) % 256 for block in encrypted_blocks]).astype(int)
-        decrypted_img = decrypted_blocks.reshape(img_padded.shape)
+    # Reshape back to original image shape
+    encrypted_image = np.array(encrypted_pixels[: len(pixel_values)]).reshape(original_shape)
+    return Image.fromarray(encrypted_image.astype(np.uint8))
 
-        # Remove padding
-        encrypted_img = encrypted_img[:height, :width]
-        decrypted_img = decrypted_img[:height, :width]
+# Decrypt function using Hill cipher
+def hill_cipher_decrypt(encrypted_image, key_matrix):
+    # Get inverse of key matrix in mod 256
+    key_matrix_inv = mod_matrix_inverse(key_matrix)
 
-        return img_array, encrypted_img.astype(np.uint8), decrypted_img.astype(np.uint8)
-    
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return None, None, None
+    # Convert image to numpy array
+    pixel_values = np.array(encrypted_image)
+    original_shape = pixel_values.shape
+    pixel_values = pixel_values.flatten()
 
-# Get user input for the 16x16 key matrix
-while True:
-    key_matrix = get_user_matrix()
-    if is_invertible(key_matrix):
-        break
-    else:
-        print("The matrix is not invertible. Please enter a new matrix.")
+    # Split into groups of 5 pixels
+    pixel_groups = np.split(pixel_values, len(pixel_values) // 5)
 
-# Encrypt and decrypt the image
-original, encrypted, decrypted = encrypt_decrypt_image('frog.jpg', key_matrix)
+    # Decrypt each group
+    decrypted_pixels = []
+    for group in pixel_groups:
+        decrypted_group = np.dot(key_matrix_inv, group) % 256
+        decrypted_pixels.extend(decrypted_group)
 
-if original is not None and encrypted is not None and decrypted is not None:
-    # Display results
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-    ax1.imshow(original)
-    ax1.set_title('Original')
-    ax1.axis('off')
-    ax2.imshow(encrypted, cmap='gray')
-    ax2.set_title('Encrypted')
-    ax2.axis('off')
-    ax3.imshow(decrypted, cmap='gray')
-    ax3.set_title('Decrypted')
-    ax3.axis('off')
-    plt.tight_layout()
-    plt.show()
+    # Reshape back to original image shape
+    decrypted_image = np.array(decrypted_pixels[: len(pixel_values)]).reshape(original_shape)
+    return Image.fromarray(decrypted_image.astype(np.uint8))
 
-    # Verify key matrix
-    print("Key Matrix:")
-    print(key_matrix)
-    print("\nDeterminant of Key Matrix:", np.linalg.det(key_matrix))
-    print("\nInverse of Key Matrix:")
-    print(np.linalg.inv(key_matrix))
-else:
-    print("Failed to process the image. Please check the image file and try again.")
+# Example usage:
+if __name__ == "__main__":
+    # Open the grayscale image
+    image = Image.open("Nature.jpg").convert("L")  # Convert to grayscale
+
+    # Generate a random invertible 5x5 key matrix
+    key_matrix = generate_random_invertible_matrix()
+
+    print("Random Invertible Key Matrix:\n", key_matrix)
+
+    # Encrypt the image
+    encrypted_image = hill_cipher_encrypt(image, key_matrix)
+    encrypted_image.save("hill_encrypted_image.png")
+
+    # Decrypt the image
+    decrypted_image = hill_cipher_decrypt(encrypted_image, key_matrix)
+    decrypted_image.save("hill_decrypted_image.png")
