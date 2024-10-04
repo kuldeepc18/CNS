@@ -118,8 +118,8 @@ def display_images(key_image_path, input_image, encrypted_image, decrypted_image
 if __name__ == "__main__":
     key_image_path = "Tulips.jpg"
     input_image_path = "scenery.jpg"
-    encrypted_image_path = "encrypted_image.png"
-    decrypted_image_path = "decrypted_image.png"
+    encrypted_image_path = "playfair_encrypted_image.png"
+    decrypted_image_path = "playfair_decrypted_image.png"
 
     matrix = generate_matrix_from_image(key_image_path)
     pprint(matrix)
